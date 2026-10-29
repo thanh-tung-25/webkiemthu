@@ -1,0 +1,446 @@
+<div class="container py-5">
+  <div *ngIf="loading" class="text-center py-5">
+    <div class="spinner-border text-dark"></div>
+    <p class="mt-3 text-muted">Đang tải sản phẩm...</p>
+  </div>
+
+  <div *ngIf="!loading && errorMessage" class="alert alert-danger">
+    {{ errorMessage }}
+  </div>
+
+  <div *ngIf="!loading && product" class="row g-5">
+    <div class="col-lg-6">
+      <div class="main-image-wrapper">
+        <img
+          [src]="selectedImage"
+          [alt]="product.productName"
+          class="main-image"
+          (error)="onImageError($event)"
+        />
+      </div>
+
+      <div class="thumbnail-list mt-3" *ngIf="product.images.length > 0">
+        <button
+          type="button"
+          class="thumbnail-item"
+          *ngFor="let image of product.images"
+          [class.active]="selectedImage === image.imageUrl"
+          (click)="selectImage(image)"
+        >
+          <img
+            [src]="image.imageUrl | imageUrl"
+            [alt]="product.productName"
+            (error)="onImageError($event)"
+          />
+        </button>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <p class="text-uppercase text-muted small mb-2">
+        {{ product.categoryName }}
+        <span *ngIf="product.brandName">· {{ product.brandName }}</span>
+      </p>
+
+      <h1 class="product-title">{{ product.productName }}</h1>
+
+      <div class="sku-row" *ngIf="selectedVariant">
+        <span>SKU: <strong>{{ selectedVariant.sku }}</strong></span>
+
+        <button type="button" class="copy-sku-btn" (click)="copySku()">
+          <i
+            class="bi"
+            [class.bi-copy]="!skuCopied"
+            [class.bi-check2]="skuCopied"
+          ></i>
+          {{ skuCopied ? "Đã sao chép" : "Sao chép" }}
+        </button>
+      </div>
+
+      <div class="price-box mb-4">
+        <span class="current-price">
+          {{ currentPrice | number: "1.0-0" }} ₫
+        </span>
+
+        <del
+          *ngIf="
+            selectedVariant?.effectiveSalePrice ||
+            (!selectedVariant && product.salePrice)
+          "
+          class="old-price ms-2"
+        >
+          {{ selectedVariant?.effectivePrice || product.basePrice | number: "1.0-0" }} ₫
+        </del>
+      </div>
+
+      <p class="short-description" *ngIf="product.shortDescription">
+        {{ product.shortDescription }}
+      </p>
+
+      <hr />
+
+      <div class="option-group">
+        <div class="option-label">
+          Màu sắc
+          <span class="required">*</span>
+        </div>
+
+        <div class="d-flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="color-button"
+            *ngFor="let color of colors"
+            [class.active]="selectedColorId === color.colorId"
+            (click)="selectColor(color.colorId)"
+            [title]="color.colorName"
+          >
+            <span
+              class="color-dot"
+              [style.backgroundColor]="color.colorCode || '#333'"
+            ></span>
+            {{ color.colorName }}
+          </button>
+        </div>
+      </div>
+
+      <div class="option-group">
+        <div class="option-label size-label-row">
+          <span>
+            Kích thước
+            <span class="required">*</span>
+          </span>
+
+          <button
+            *ngIf="isShirtProduct"
+            type="button"
+            class="size-guide-link"
+            (click)="openSizeGuide()"
+          >
+            <i class="bi bi-rulers me-1"></i>
+            Hướng dẫn chọn size
+          </button>
+        </div>
+
+        <p *ngIf="!selectedColorId" class="text-muted small">
+          Hãy chọn màu trước để xem kích thước có sẵn.
+        </p>
+
+        <div class="d-flex flex-wrap gap-2" *ngIf="selectedColorId">
+          <button
+            type="button"
+            class="size-button"
+            *ngFor="let size of availableSizes"
+            [class.active]="selectedSizeId === size.sizeId"
+            [class.out-of-stock]="size.stockQuantity <= 0"
+            (click)="selectSize(size.sizeId)"
+          >
+            {{ size.sizeName }}
+          </button>
+        </div>
+      </div>
+
+      <div class="stock-message" *ngIf="selectedVariant">
+        <span *ngIf="stockQuantity > 0" class="text-success">
+          <i class="bi bi-check-circle-fill"></i>
+          Còn {{ stockQuantity }} sản phẩm
+        </span>
+
+        <span *ngIf="stockQuantity <= 0" class="text-danger">
+          <i class="bi bi-x-circle-fill"></i>
+          Sản phẩm này đã hết hàng
+        </span>
+      </div>
+
+      <div class="alert alert-success mt-3" *ngIf="successMessage">
+        {{ successMessage }}
+      </div>
+
+      <div class="alert alert-danger mt-3" *ngIf="cartErrorMessage">
+        {{ cartErrorMessage }}
+      </div>
+
+      <div class="add-cart-row mt-4">
+        <div class="quantity-control product-quantity-control">
+          <button
+            type="button"
+            class="quantity-button"
+            aria-label="Giảm số lượng"
+            [disabled]="quantity <= 1"
+            (click)="decreaseQuantity()"
+          >
+            &minus;
+          </button>
+
+          <span class="quantity-value">{{ quantity }}</span>
+
+          <button
+            type="button"
+            class="quantity-button"
+            aria-label="Tăng số lượng"
+            [disabled]="
+              !selectedVariant ||
+              quantity >= stockQuantity ||
+              quantity >= maxCartQuantity
+            "
+            (click)="increaseQuantity()"
+          >
+            +
+          </button>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-dark add-cart-button"
+          [disabled]="!canAddToCart"
+          (click)="addToCart()"
+        >
+          <span
+            *ngIf="addingToCart"
+            class="spinner-border spinner-border-sm me-2"
+          ></span>
+
+          <i *ngIf="!addingToCart" class="bi bi-bag-plus me-2"></i>
+
+          {{ addingToCart ? "Đang thêm..." : "Thêm vào giỏ hàng" }}
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-danger buy-now-button"
+          [disabled]="!canAddToCart"
+          (click)="buyNow()"
+        >
+          <i class="bi bi-lightning-charge-fill me-2"></i>
+          Mua ngay
+        </button>
+      </div>
+
+      <div class="description-block" *ngIf="product.description">
+        <h3 class="info-heading">Mô tả sản phẩm</h3>
+        <p class="description">{{ product.description }}</p>
+      </div>
+
+      <div class="product-info-list">
+        <h3 class="info-heading">Thông tin sản phẩm</h3>
+
+        <ul>
+          <li>
+            <span>Danh mục</span>
+            <strong>{{ product.categoryName }}</strong>
+          </li>
+
+          <li *ngIf="product.brandName">
+            <span>Thương hiệu</span>
+            <strong>{{ product.brandName }}</strong>
+          </li>
+
+          <li *ngIf="product.material">
+            <span>Chất liệu</span>
+            <strong>{{ product.material }}</strong>
+          </li>
+
+          <li>
+            <span>Giới tính</span>
+            <strong>{{ genderLabel }}</strong>
+          </li>
+        </ul>
+      </div>
+
+      <div class="policy-list">
+        <div class="policy-item">
+          <i class="bi bi-truck"></i>
+          <span>Miễn phí vận chuyển cho đơn từ 500K</span>
+        </div>
+
+        <div class="policy-item">
+          <i class="bi bi-arrow-repeat"></i>
+          <span>Đổi trả dễ dàng trong 30 ngày</span>
+        </div>
+
+        <div class="policy-item">
+          <i class="bi bi-patch-check"></i>
+          <span>Cam kết sản phẩm chính hãng 100%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!--  Review Section -->
+  <section *ngIf="!loading && product" class="review-section">
+    <div class="review-heading">
+      <div>
+        <h3>Đánh giá từ khách hàng</h3>
+        <p>{{ reviewTotalItems }} đánh giá đã được duyệt</p>
+      </div>
+    </div>
+
+    <div *ngIf="reviewsLoading" class="text-center py-4">
+      <div class="spinner-border spinner-border-sm"></div>
+      <span class="ms-2 text-muted">Đang tải đánh giá...</span>
+    </div>
+
+    <div *ngIf="!reviewsLoading && reviews.length === 0" class="empty-review">
+      Chưa có đánh giá nào cho sản phẩm này.
+    </div>
+
+    <article *ngFor="let review of reviews" class="review-item">
+      <div class="review-user">
+        <div class="avatar">
+          {{ review.userFullName.charAt(0).toUpperCase() }}
+        </div>
+
+        <div>
+          <strong>{{ review.userFullName }}</strong>
+
+          <div class="stars">
+            <i
+              *ngFor="let star of getStars(review.rating)"
+              class="bi bi-star-fill"
+            ></i>
+
+            <span>{{ review.rating }}/5</span>
+          </div>
+        </div>
+
+        <small>
+          {{ review.createdAt | date: "dd/MM/yyyy" }}
+        </small>
+      </div>
+
+      <p *ngIf="review.comment" class="review-content">
+        {{ review.comment }}
+      </p>
+    </article>
+
+    <div
+      *ngIf="!reviewsLoading && reviewTotalPages > 1"
+      class="d-flex justify-content-center align-items-center gap-2 mt-4"
+    >
+      <button
+        type="button"
+        class="btn btn-outline-secondary btn-sm"
+        [disabled]="reviewPage === 1"
+        (click)="previousReviewPage()"
+      >
+        Trước
+      </button>
+
+      <span>Trang {{ reviewPage }} / {{ reviewTotalPages }}</span>
+
+      <button
+        type="button"
+        class="btn btn-outline-secondary btn-sm"
+        [disabled]="reviewPage === reviewTotalPages"
+        (click)="nextReviewPage()"
+      >
+        Sau
+      </button>
+    </div>
+  </section>
+
+  <!-- Related products -->
+  <section
+    *ngIf="!loading && !relatedLoading && relatedProducts.length > 0"
+    class="related-section"
+  >
+    <h3 class="related-heading">Sản phẩm liên quan</h3>
+
+    <div class="related-grid">
+      <app-product-card
+        *ngFor="let related of relatedProducts"
+        [product]="related"
+      ></app-product-card>
+    </div>
+  </section>
+
+  <div
+    *ngIf="showSizeGuide"
+    class="size-guide-overlay"
+    (click)="closeSizeGuide()"
+  >
+    <div
+      class="size-guide-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Hướng dẫn chọn size áo"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="size-guide-header">
+        <div>
+          <p class="section-label mb-1">SIZE GUIDE</p>
+          <h3>Hướng dẫn chọn size áo</h3>
+        </div>
+
+        <button
+          type="button"
+          class="size-guide-close"
+          aria-label="Đóng hướng dẫn chọn size"
+          (click)="closeSizeGuide()"
+        >
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+
+      <p class="size-guide-description">
+        Bảng size tham khảo cho các sản phẩm áo. Hãy đo một chiếc áo vừa vặn của
+        bạn rồi so sánh để chọn size phù hợp.
+      </p>
+
+      <div class="table-responsive">
+        <table class="table size-guide-table">
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th>Ngang ngực</th>
+              <th>Dài áo</th>
+              <th>Rộng vai</th>
+              <th>Cân nặng gợi ý</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><strong>S</strong></td>
+              <td>48 cm</td>
+              <td>66 cm</td>
+              <td>42 cm</td>
+              <td>45 – 55 kg</td>
+            </tr>
+
+            <tr>
+              <td><strong>M</strong></td>
+              <td>51 cm</td>
+              <td>69 cm</td>
+              <td>44 cm</td>
+              <td>55 – 65 kg</td>
+            </tr>
+
+            <tr>
+              <td><strong>L</strong></td>
+              <td>54 cm</td>
+              <td>72 cm</td>
+              <td>46 cm</td>
+              <td>65 – 75 kg</td>
+            </tr>
+
+            <tr>
+              <td><strong>XL</strong></td>
+              <td>57 cm</td>
+              <td>75 cm</td>
+              <td>48 cm</td>
+              <td>75 – 85 kg</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="size-guide-note">
+        <i class="bi bi-info-circle"></i>
+
+        <span>
+          Số đo có thể chênh lệch từ 1–2 cm. Nếu bạn thích mặc rộng hoặc đang
+          phân vân giữa hai size, hãy chọn size lớn hơn.
+        </span>
+      </div>
+    </div>
+  </div>
+</div>

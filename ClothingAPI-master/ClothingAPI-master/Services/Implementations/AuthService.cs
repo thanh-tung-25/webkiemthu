@@ -1,0 +1,273 @@
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using ClothingAPI.Data;
+using ClothingAPI.DTOs.Auth;
+using ClothingAPI.Exceptions;
+using ClothingAPI.Helpers;
+using ClothingAPI.Models;
+using ClothingAPI.Services.Interfaces;
+using System;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
+
+namespace ClothingAPI.Services.Implementations
+{
+    public class AuthService : IAuthService
+    {
+        private readonly AppDbContext _context;
+        private readonly ITokenService _tokenService;
+        private readonly IEmailService _emailService;
+        private readonly FrontendSettings _frontendSettings;
+        private readonly ILogger<AuthService> _logger;
+        private readonly IRefreshTokenService _refreshTokenService;
+        private readonly ITwoFactorService _twoFactorService;
+
+        public AuthService(
+            AppDbContext context,
+            ITokenService tokenService,
+            IEmailService emailService,
+            IOptions<FrontendSettings> frontendSettings,
+            ILogger<AuthService> logger,
+            IRefreshTokenService refreshTokenService,
+            ITwoFactorService twoFactorService)
+        {
+            _context = context;
+            _tokenService = tokenService;
+            _emailService = emailService;
+            _frontendSettings = frontendSettings.Value;
+            _logger = logger;
+            _refreshTokenService = refreshTokenService;
+            _twoFactorService = twoFactorService;
+        }
+
+        public async Task<AuthResponseDto> RegisterAsync(RegisterDto registerDto)
+        {
+            var email = registerDto.Email.Trim().ToLower();
+
+            var emailExists = await _context.Users.AnyAsync(x => x.Email == email);
+
+            if (emailExists)
+            {
+                throw new BadRequestException("Email này đã được sử dụng.");
+            }
+
+            var customerRole = await _context.Roles.FirstOrDefaultAsync(x => x.RoleName == "Customer");
+
+            if (customerRole is null)
+            {
+                throw new InvalidOperationException("Không tìm thấy role Customer trong database.");
+            }
+
+            var user = new User
+            {
+                FullName = registerDto.FullName.Trim(),
+                Email = email,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password),
+                PhoneNumber = string.IsNullOrWhiteSpace(registerDto.PhoneNumber) ? null : registerDto.PhoneNumber.Trim(),
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            user.UserRoles.Add(new UserRole
+            {
+                RoleId = customerRole.RoleId
+            });
+
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+
+            return CreateAuthResponse(user, ["Customer"]);
+        }
+
+        public async Task<LoginResult> LoginAsync(LoginDto loginDto, string? ip = null)
+        {
+            var email = loginDto.Email.Trim().ToLower();
+
+            var user = await _context.Users
+                .Include(x => x.UserRoles)
+                .ThenInclude(x => x.Role)
+                .FirstOrDefaultAsync(x => x.Email == email);
+
+            if (user is not null && AccountLockout.IsLockedOut(user, DateTime.UtcNow, out var remainingMinutes))
+            {
+                _logger.LogWarning(
+                    "Từ chối đăng nhập: tài khoản {Email} đang bị khóa đến {LockoutEnd} UTC (còn {RemainingMinutes} phút).",
+                    email, user.LockoutEndUtc.Value, remainingMinutes
+                );
+
+                throw new UnauthorizedException(
+                    $"Tài khoản tạm khóa do đăng nhập sai quá nhiều lần. Vui lòng thử lại sau {remainingMinutes} phút."
+                );
+            }
+
+            if (user is null || !BCrypt.Net.BCrypt.Verify(loginDto.Password, user.PasswordHash))
+            {
+                if (user is not null)
+                {
+                    AccountLockout.RegisterFailure(user, DateTime.UtcNow, _logger, "Đăng nhập");
+                    await _context.SaveChangesAsync();
+                }
+
+                throw new UnauthorizedException("Email hoặc mật khẩu không đúng.");
+            }
+
+            if (!user.IsActive)
+            {
+                throw new UnauthorizedException("Tài khoản của bạn đã bị khóa.");
+            }
+
+            if (user.TwoFactorEnabled)
+            {
+                // Mật khẩu đúng mới chỉ là lớp 1: KHÔNG cấp token và KHÔNG reset bộ đếm sai. Nếu reset ở đây,
+                // kẻ biết mật khẩu cứ đoán sai mã 4 lần rồi đăng nhập lại là bộ đếm về 0, giới hạn theo user mất tác dụng.
+                var challenge = await _twoFactorService.CreateLoginChallengeAsync(user.UserId, ip);
+
+                return new LoginResult(null, challenge);
+            }
+
+            if (user.FailedLoginAttempts > 0 || user.LockoutEndUtc.HasValue)
+            {
+                _logger.LogInformation(
+                    "Đăng nhập thành công cho {Email}, đã reset bộ đếm đăng nhập sai.",
+                    user.Email
+                );
+
+                AccountLockout.Reset(user);
+                await _context.SaveChangesAsync();
+            }
+
+            var roles = user.UserRoles.Select(x => x.Role.RoleName).ToList();
+
+            return new LoginResult(CreateAuthResponse(user, roles), null);
+        }
+
+        public async Task<CurrentUserDto> GetCurrentUserAsync(int userId)
+        {
+            var user = await _context.Users
+                .Include(x => x.UserRoles)
+                .ThenInclude(x => x.Role)
+                .FirstOrDefaultAsync(x => x.UserId == userId);
+
+            if (user is null)
+            {
+                throw new UnauthorizedException("Không tìm thấy người dùng.");
+            }
+
+            return new CurrentUserDto
+            {
+                UserId = user.UserId,
+                FullName = user.FullName,
+                Email = user.Email,
+                PhoneNumber = user.PhoneNumber,
+                AvatarUrl = user.AvatarUrl,
+                Roles = user.UserRoles.Select(x => x.Role.RoleName).ToList(),
+                TwoFactorEnabled = user.TwoFactorEnabled
+            };
+        }
+
+        public async Task<AuthResponseDto> CreateAuthResponseForUserAsync(int userId)
+        {
+            var user = await _context.Users
+                .AsNoTracking()
+                .Include(x => x.UserRoles)
+                .ThenInclude(x => x.Role)
+                .FirstOrDefaultAsync(x => x.UserId == userId);
+
+            if (user is null)
+            {
+                throw new UnauthorizedException("Không tìm thấy người dùng.");
+            }
+
+            return CreateAuthResponse(user, user.UserRoles.Select(x => x.Role.RoleName).ToList());
+        }
+
+        public async Task ForgotPasswordAsync(ForgotPasswordDto forgotPasswordDto)
+        {
+            var email = forgotPasswordDto.Email.Trim().ToLower();
+
+            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == email);
+
+            if (user is null || !user.IsActive)
+            {
+                return;
+            }
+
+            var token = GenerateResetToken();
+
+            user.ResetPasswordToken = token;
+            user.ResetPasswordTokenExpiry = DateTime.UtcNow.AddMinutes(30);
+            await _context.SaveChangesAsync();
+
+            var resetLink = $"{_frontendSettings.BaseUrl}/auth/reset-password?token={token}";
+
+            var htmlBody = $"""
+                <p>Xin chào {user.FullName},</p>
+                <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản Clothing Store của bạn.</p>
+                <p>Vui lòng bấm vào liên kết bên dưới để đặt lại mật khẩu. Liên kết có hiệu lực trong 30 phút:</p>
+                <p><a href="{resetLink}">Đặt lại mật khẩu</a></p>
+                <p>Nếu bạn không yêu cầu điều này, vui lòng bỏ qua email này.</p>
+                """;
+
+            try
+            {
+                await _emailService.SendAsync(user.Email, "Đặt lại mật khẩu - Clothing Store", htmlBody);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Gửi email đặt lại mật khẩu thất bại cho {Email}", user.Email);
+            }
+        }
+
+        public async Task ResetPasswordAsync(ResetPasswordDto resetPasswordDto)
+        {
+            var user = await _context.Users
+                .FirstOrDefaultAsync(x => x.ResetPasswordToken == resetPasswordDto.Token);
+
+            if (user is null || user.ResetPasswordTokenExpiry is null || user.ResetPasswordTokenExpiry < DateTime.UtcNow)
+            {
+                throw new BadRequestException("Token không hợp lệ hoặc đã hết hạn.");
+            }
+
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(resetPasswordDto.NewPassword);
+            user.ResetPasswordToken = null;
+            user.ResetPasswordTokenExpiry = null;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            // Đặt lại mật khẩu (thường vì nghi bị lộ) => đăng xuất mọi thiết bị. Cùng transaction để không có trạng thái nửa vời.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
+            await _context.SaveChangesAsync();
+            await _refreshTokenService.RevokeAllForUserAsync(user.UserId, RefreshTokenRevokeReasons.PasswordReset);
+
+            await transaction.CommitAsync();
+        }
+
+        private static string GenerateResetToken()
+        {
+            return Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        }
+
+        private AuthResponseDto CreateAuthResponse(User user, List<string> roles)
+        {
+            // Thời hạn lấy từ JwtSettings:ExpirationMinutes (nguồn cấu hình duy nhất, nằm trong TokenService).
+            var (accessToken, expiresAt) = _tokenService.CreateToken(user, roles);
+
+            return new AuthResponseDto
+            {
+                AccessToken = accessToken,
+                ExpiresAt = expiresAt,
+                User = new CurrentUserDto
+                {
+                    UserId = user.UserId,
+                    FullName = user.FullName,
+                    Email = user.Email,
+                    PhoneNumber = user.PhoneNumber,
+                    AvatarUrl = user.AvatarUrl,
+                    Roles = roles,
+                    TwoFactorEnabled = user.TwoFactorEnabled
+                }
+            };
+        }
+    }
+}

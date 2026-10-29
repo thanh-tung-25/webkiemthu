@@ -1,0 +1,244 @@
+<div class="auth-page">
+  <div class="auth-shell">
+    <aside class="auth-visual">
+      <div class="auth-visual__content">
+        <a routerLink="/" class="auth-visual__brand">
+          <i class="bi bi-bag-heart"></i>
+          CLOTHING STORE
+        </a>
+
+        <h2>Phong cách của bạn,<br /><span>câu chuyện của riêng bạn</span></h2>
+        <p>
+          Khám phá những bộ sưu tập thời trang mới nhất, được tuyển chọn dành
+          riêng cho bạn.
+        </p>
+      </div>
+
+      <ul class="auth-visual__perks">
+        <li><i class="bi bi-truck"></i> Miễn phí vận chuyển cho đơn từ 500K</li>
+        <li>
+          <i class="bi bi-arrow-repeat"></i> Đổi trả dễ dàng trong 30 ngày
+        </li>
+        <li>
+          <i class="bi bi-patch-check"></i> Cam kết sản phẩm chính hãng 100%
+        </li>
+      </ul>
+    </aside>
+
+    <main class="auth-form-panel">
+      <form
+        *ngIf="step === 'credentials'"
+        class="auth-card"
+        [formGroup]="loginForm"
+        (ngSubmit)="submit()"
+      >
+        <a routerLink="/" class="brand-mobile">CLOTHING STORE</a>
+
+        <div class="auth-card__header">
+          <h1>Chào mừng trở lại</h1>
+          <p class="text-muted">
+            Đăng nhập để tiếp tục hành trình mua sắm của bạn.
+          </p>
+        </div>
+
+        <div *ngIf="errorMessage" class="alert alert-danger">
+          <i class="bi bi-exclamation-circle"></i>
+          <span>{{ errorMessage }}</span>
+        </div>
+
+        <div *ngIf="successMessage" class="alert alert-success">
+          <i class="bi bi-check-circle"></i>
+          <span>{{ successMessage }}</span>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="email">Email</label>
+          <div
+            class="input-with-icon"
+            [class.is-invalid]="email?.touched && email?.invalid"
+          >
+            <i class="bi bi-envelope"></i>
+            <input
+              id="email"
+              type="email"
+              formControlName="email"
+              placeholder="example@email.com"
+              autocomplete="email"
+            />
+          </div>
+          <small *ngIf="email?.touched && email?.invalid" class="field-error">
+            <i class="bi bi-exclamation-circle"></i>
+            Vui lòng nhập email hợp lệ.
+          </small>
+        </div>
+
+        <div class="form-field">
+          <div class="form-label-row">
+            <label class="form-label" for="password">Mật khẩu</label>
+            <a routerLink="/auth/forgot-password" class="forgot-password-link"
+              >Quên mật khẩu?</a
+            >
+          </div>
+          <div
+            class="input-with-icon"
+            [class.is-invalid]="password?.touched && password?.invalid"
+          >
+            <i class="bi bi-lock"></i>
+            <input
+              id="password"
+              [type]="showPassword ? 'text' : 'password'"
+              formControlName="password"
+              placeholder="Nhập mật khẩu"
+              autocomplete="current-password"
+            />
+            <button
+              type="button"
+              class="toggle-visibility"
+              (click)="showPassword = !showPassword"
+              [attr.aria-label]="showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'"
+            >
+              <i
+                class="bi"
+                [class.bi-eye]="!showPassword"
+                [class.bi-eye-slash]="showPassword"
+              ></i>
+            </button>
+          </div>
+          <small
+            *ngIf="password?.touched && password?.invalid"
+            class="field-error"
+          >
+            <i class="bi bi-exclamation-circle"></i>
+            Vui lòng nhập mật khẩu.
+          </small>
+        </div>
+
+        <div class="form-field">
+          <app-turnstile (tokenChange)="captchaToken = $event"></app-turnstile>
+          <small *ngIf="!captchaToken" class="field-hint">
+            Hoàn tất xác minh bên trên để đăng nhập.
+          </small>
+        </div>
+
+        <button
+          type="submit"
+          class="btn-submit"
+          [disabled]="isSubmitting || !captchaToken"
+        >
+          <span
+            *ngIf="isSubmitting"
+            class="spinner-border spinner-border-sm"
+          ></span>
+          {{ isSubmitting ? "Đang đăng nhập..." : "Đăng nhập" }}
+        </button>
+
+        <p class="auth-switch">
+          Chưa có tài khoản?
+          <a routerLink="/auth/register">Đăng ký ngay</a>
+        </p>
+      </form>
+
+      <!-- Bước 2: tài khoản bật xác thực hai lớp. Chưa có phiên đăng nhập cho tới khi mã đúng. -->
+      <form
+        *ngIf="step !== 'credentials'"
+        class="auth-card"
+        [formGroup]="codeForm"
+        (ngSubmit)="submitCode()"
+      >
+        <a routerLink="/" class="brand-mobile">CLOTHING STORE</a>
+
+        <div class="auth-card__header">
+          <h1>Xác thực hai lớp</h1>
+          <p class="text-muted" *ngIf="step === 'totp'">
+            Nhập mã 6 số đang hiển thị trong ứng dụng xác thực (Google
+            Authenticator...).
+          </p>
+          <p class="text-muted" *ngIf="step === 'recovery'">
+            Nhập một mã khôi phục bạn đã lưu khi bật xác thực hai lớp. Mỗi mã
+            chỉ dùng được một lần.
+          </p>
+        </div>
+
+        <div *ngIf="errorMessage" class="alert alert-danger">
+          <i class="bi bi-exclamation-circle"></i>
+          <span>{{ errorMessage }}</span>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="code">
+            {{ step === "totp" ? "Mã xác thực" : "Mã khôi phục" }}
+          </label>
+          <div class="input-with-icon">
+            <i
+              class="bi"
+              [class.bi-shield-lock]="step === 'totp'"
+              [class.bi-key]="step === 'recovery'"
+            ></i>
+            <input
+              *ngIf="step === 'totp'"
+              id="code"
+              class="otp-input"
+              type="text"
+              formControlName="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="6"
+              placeholder="000000"
+              (input)="onTotpInput()"
+            />
+            <input
+              *ngIf="step === 'recovery'"
+              id="code"
+              class="otp-input"
+              type="text"
+              formControlName="code"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              maxlength="20"
+              placeholder="XXXX-XXXX-XXXX"
+            />
+          </div>
+          <small class="field-hint">
+            Phiên xác thực có hiệu lực {{ challengeMinutes }} phút. Hết thời
+            gian bạn cần đăng nhập lại.
+          </small>
+        </div>
+
+        <button type="submit" class="btn-submit" [disabled]="isSubmitting">
+          <span
+            *ngIf="isSubmitting"
+            class="spinner-border spinner-border-sm"
+          ></span>
+          {{ isSubmitting ? "Đang xác thực..." : "Xác nhận" }}
+        </button>
+
+        <div class="two-factor-links">
+          <button
+            *ngIf="step === 'totp'"
+            type="button"
+            class="link-button"
+            (click)="switchStep('recovery')"
+          >
+            Dùng mã khôi phục
+          </button>
+          <button
+            *ngIf="step === 'recovery'"
+            type="button"
+            class="link-button"
+            (click)="switchStep('totp')"
+          >
+            Dùng mã từ ứng dụng xác thực
+          </button>
+          <button
+            type="button"
+            class="link-button"
+            (click)="backToCredentials()"
+          >
+            <i class="bi bi-arrow-left"></i> Quay lại
+          </button>
+        </div>
+      </form>
+    </main>
+  </div>
+</div>
