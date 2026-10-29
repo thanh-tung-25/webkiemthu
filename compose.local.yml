@@ -1,0 +1,30 @@
+name: clothing-nhom16
+services:
+  db:
+    extends:
+      file: ClothingAPI-master/ClothingAPI-master/docker-compose.yml
+      service: db
+    container_name: clothing-nhom16-db
+  api:
+    extends:
+      file: ClothingAPI-master/ClothingAPI-master/docker-compose.yml
+      service: api
+    container_name: clothing-nhom16-api
+    build:
+      context: ./ClothingAPI-master/ClothingAPI-master
+    environment:
+      Cors__AllowedOrigins: http://localhost:4200
+      DemoSeed__Enabled: "true"
+  frontend:
+    extends:
+      file: ClothingAPI-master/ClothingAPI-master/docker-compose.yml
+      service: frontend
+    container_name: clothing-nhom16-frontend
+    build:
+      context: ./WebBanQuanAo-main/WebBanQuanAo-main
+      args:
+        TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+volumes:
+  sqlserver_data:
+  uploads_data:
+  dataprotection_data:

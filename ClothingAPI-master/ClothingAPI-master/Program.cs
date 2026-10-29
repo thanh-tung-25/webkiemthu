@@ -226,6 +226,8 @@ namespace ClothingAPI
                 dbContext.Database.Migrate();
 
                 await SeedAdminAsync(dbContext, app.Configuration);
+                if (app.Configuration.GetValue<bool>("DemoSeed:Enabled"))
+                    await DemoCatalogSeed.SeedAsync(dbContext);
             }
             app.UseMiddleware<ExceptionMiddleware>();
 

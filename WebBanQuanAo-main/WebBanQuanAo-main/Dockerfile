@@ -9,6 +9,11 @@ RUN npm ci
 
 COPY . .
 
+ARG TURNSTILE_SITE_KEY
+RUN if [ -n "$TURNSTILE_SITE_KEY" ]; then \
+    TURNSTILE_SITE_KEY="$TURNSTILE_SITE_KEY" node -e "const fs=require('fs'); const p='src/environments/environment.prod.ts'; fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace(/turnstileSiteKey: '[^']*'/, 'turnstileSiteKey: '+JSON.stringify(process.env.TURNSTILE_SITE_KEY)));"; \
+    fi
+
 RUN npm run build -- --configuration production
 
 
